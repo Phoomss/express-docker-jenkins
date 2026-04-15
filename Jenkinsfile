@@ -2,8 +2,8 @@ pipeline {
     // ใช้ Docker agent ที่มี Node.js และ Docker CLI
     agent {
         docker {
-            image 'node:22-alpine'
-            args '-v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker'
+            image 'node:22'
+            args '-u root:root -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
 
