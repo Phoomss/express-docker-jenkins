@@ -17,7 +17,17 @@ pipeline {
 
     stages {
 
-        // Stage 1: ดึง source code ล่าสุดจาก Git repository
+        // Stage 1: ติดตั้ง Docker CLI ใน container
+        stage('Setup Docker') {
+            steps {
+                sh '''
+                    apt-get update
+                    apt-get install -y docker.io
+                '''
+            }
+        }
+
+        // Stage 2: ดึง source code ล่าสุดจาก Git repository
         stage('Checkout') {
             steps {
                 echo "Checking out code..."
@@ -25,7 +35,7 @@ pipeline {
             }
         }
 
-        // Stage 2: ติดตั้ง dependencies และ run test
+        // Stage 3: ติดตั้ง dependencies และ run test
         stage('Install & Test') {
             steps {
                 sh '''
@@ -35,7 +45,7 @@ pipeline {
             }
         }
 
-        // Stage 3: Build Docker image
+        // Stage 4: Build Docker image
         stage('Build Docker Image') {
             steps {
                 sh """
@@ -52,7 +62,7 @@ pipeline {
             }
         }
 
-        // Stage 4: Push image ไป Docker Hub
+        // Stage 5: Push image ไป Docker Hub
         stage('Push Docker Image') {
             steps {
                 withCredentials([usernamePassword(
@@ -75,7 +85,7 @@ pipeline {
             }
         }
 
-        // Stage 5: ลบ image ที่ build ออกจากเครื่อง Jenkins (cleanup space)
+        // Stage 6: ลบ image ที่ build ออกจากเครื่อง Jenkins (cleanup space)
         stage('Cleanup Docker') {
             steps {
                 sh """
@@ -90,7 +100,7 @@ pipeline {
             }
         }
 
-        // Stage 6: Deploy container บนเครื่อง local (ใช้ latest image)
+        // Stage 7: Deploy container บนเครื่อง local (ใช้ latest image)
         stage('Deploy Local') {
             steps {
                 sh """
