@@ -1,13 +1,18 @@
 pipeline {
-    // ใช้ agent ไหนก็ได้ (node ใดก็ได้ใน Jenkins)
-    agent any
+    // ใช้ Docker agent ที่มี Node.js และ Docker CLI
+    agent {
+        docker {
+            image 'node:22-alpine'
+            args '-v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker'
+        }
+    }
 
     // กำหนด environment variables ที่ใช้ใน pipeline
     environment {
         DOCKER_HUB_CREDENTIALS_ID = 'dockerhub-cred' // Jenkins credential สำหรับ login Docker Hub
         DOCKER_REPO               = "phoom005/express-app" // ชื่อ repo บน Docker Hub
         APP_NAME                  = "express-app" // ชื่อ container ที่จะ run
-        PATH                      = "/usr/local/bin:/opt/homebrew/bin:$PATH" // path สำหรับ mac/linux (แก้ปัญหา docker/npm หาไม่เจอ)
+        PATH                      = "/usr/local/bin:/usr/bin:/opt/homebrew/bin:$PATH" // path สำหรับ docker และ npm
     }
 
     stages {
