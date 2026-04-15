@@ -1,0 +1,15 @@
+services:
+  app-dev:
+    build:
+      context: .
+      target: builder #build to stage 'builder'
+    container_name: ts-app-dev-instance
+    ports:
+      - "3002:3000"
+    volumes:
+      - ./src:/app/src
+      - ./package.json:/app/package.json
+      - ./package-lock.json:/app/package-lock.json
+      - ./tsconfig.json:/app/tsconfig.json
+      - /app/node_modules
+    command: npm run start:ts
