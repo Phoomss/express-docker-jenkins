@@ -1,147 +1,92 @@
 pipeline {
-    // ใช้ Docker agent ที่มี Node.js และ Docker CLI
-    agent {
-        docker {
-            image 'node:22'
-            args '-u root:root -v /var/run/docker.sock:/var/run/docker.sock'
-        }
-    }
+    // ใช้ agent any เพราะ build จะทำงานบน Jenkins controller (Linux container) อยู่แล้ว
+    agent any
 
-    // กำหนด environment variables ที่ใช้ใน pipeline
+    // กำหนด environment variables
     environment {
-        DOCKER_HUB_CREDENTIALS_ID = 'dockerhub-cred' // Jenkins credential สำหรับ login Docker Hub
-        DOCKER_REPO               = "phoom005/express-app" // ชื่อ repo บน Docker Hub
-        APP_NAME                  = "express-app" // ชื่อ container ที่จะ run
-        PATH                      = "/usr/local/bin:/usr/bin:/opt/homebrew/bin:$PATH" // path สำหรับ docker และ npm
+        DOCKER_HUB_CREDENTIALS_ID = 'dockerhub-cred'
+        DOCKER_REPO               = "phoom005/express-docker-jenkinks"
+        APP_NAME                  = "express-docker-jenkins"
+        PATH                      = "/usr/local/bin:/opt/homebrew/bin:$PATH"
     }
 
+    // กำหนด stages ของ Pipeline
     stages {
 
-        // Stage 1: ติดตั้ง Docker CLI ใน container
-        stage('Setup Docker') {
-            steps {
-                sh '''
-                    apt-get update
-                    apt-get install -y docker.io
-                '''
-            }
-        }
-
-        // Stage 2: ดึง source code ล่าสุดจาก Git repository
+        // Stage 1: ดึงโค้ดล่าสุดจาก Git
         stage('Checkout') {
             steps {
                 echo "Checking out code..."
-                checkout scm // ใช้ Jenkins SCM config ที่ตั้งไว้ (เช่น GitHub)
+                checkout scm
             }
         }
 
-        // Stage 3: ติดตั้ง dependencies และ run test
+        // Stage 2: ติดตั้ง dependencies และรันเทสต์
         stage('Install & Test') {
+            environment {
+                PATH = "/usr/local/bin:/opt/homebrew/bin:$PATH"
+            }
             steps {
                 sh '''
-                    npm install   # ติดตั้ง dependencies
-                    npm test      # run test (ช่วย ensure ว่า code ใช้งานได้ก่อน build)
+                    npm install
+                    npm test
                 '''
             }
         }
 
-        // Stage 4: Build Docker image
+        // Stage 3: สร้าง Docker Image
         stage('Build Docker Image') {
             steps {
                 sh """
                     echo "Building Docker image: ${DOCKER_REPO}:${BUILD_NUMBER}"
-                    
-                    # build image โดยใช้ multi-stage (--target production)
-                    # tag 2 แบบ:
-                    # 1. BUILD_NUMBER (version)
-                    # 2. latest (ใช้ deploy)
-                    docker build --target production \
-                        -t ${DOCKER_REPO}:${BUILD_NUMBER} \
-                        -t ${DOCKER_REPO}:latest .
+                    docker build --target production -t ${DOCKER_REPO}:${BUILD_NUMBER} -t ${DOCKER_REPO}:latest .
                 """
             }
         }
 
-        // Stage 5: Push image ไป Docker Hub
+        // Stage 4: Push Image ไปยัง Docker Hub
         stage('Push Docker Image') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: env.DOCKER_HUB_CREDENTIALS_ID,
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
+                withCredentials([usernamePassword(credentialsId: env.DOCKER_HUB_CREDENTIALS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh """
-                        # login Docker Hub แบบ secure (ไม่ expose password)
-                        echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
-                        
-                        # push image ทั้ง version และ latest
+                        echo "Logging into Docker Hub..."
+                        echo "\${DOCKER_PASS}" | docker login -u "\${DOCKER_USER}" --password-stdin
+                        echo "Pushing image to Docker Hub..."
                         docker push ${DOCKER_REPO}:${BUILD_NUMBER}
                         docker push ${DOCKER_REPO}:latest
-                        
-                        # logout เพื่อลด security risk
                         docker logout
                     """
                 }
             }
         }
 
-        // Stage 6: ลบ image ที่ build ออกจากเครื่อง Jenkins (cleanup space)
+        // Stage 5: เคลียร์ Docker images บน agent
         stage('Cleanup Docker') {
             steps {
                 sh """
-                    # ลบ image ที่ build
+                    echo "Cleaning up local Docker images/cache on agent..."
                     docker image rm -f ${DOCKER_REPO}:${BUILD_NUMBER} || true
                     docker image rm -f ${DOCKER_REPO}:latest || true
-
-                    # ลบ unused images / cache
                     docker image prune -af || true
                     docker builder prune -af || true
                 """
             }
         }
 
-        // Stage 7: Deploy container บนเครื่อง local (ใช้ latest image)
+        // Stage 6: Deploy ไปยังเครื่อง local
         stage('Deploy Local') {
             steps {
                 sh """
-                    echo "Deploying container ${APP_NAME}..."
-
-                    # pull image ล่าสุดจาก Docker Hub
+                    echo "Deploying container ${APP_NAME} from latest image..."
                     docker pull ${DOCKER_REPO}:latest
-
-                    # stop container เดิม (ถ้ามี)
                     docker stop ${APP_NAME} || true
-
-                    # ลบ container เดิม
                     docker rm ${APP_NAME} || true
-
-                    # run container ใหม่
-                    docker run -d \
-                        --name ${APP_NAME} \
-                        -p 3000:3000 \
-                        ${DOCKER_REPO}:latest
-
-                    # แสดงสถานะ container
-                    docker ps --filter name=${APP_NAME} \
-                        --format "table {{.Names}}\\t{{.Image}}\\t{{.Status}}"
+                    docker run -d --name ${APP_NAME} -p 3000:3000 ${DOCKER_REPO}:latest
+                    docker ps --filter name=${APP_NAME} --format "table {{.Names}}\\t{{.Image}}\\t{{.Status}}"
                 """
             }
         }
+
     }
 
-    // ส่วน post ใช้ handle หลัง pipeline run เสร็จ
-    post {
-        always {
-            // run ทุกครั้ง ไม่ว่าจะ success หรือ fail
-            echo "Pipeline finished with status: ${currentBuild.currentResult}"
-        }
-        success {
-            // run เมื่อ pipeline สำเร็จ
-            echo "Pipeline succeeded!"
-        }
-        failure {
-            // run เมื่อ pipeline ล้มเหลว
-            echo "Pipeline failed!"
-        }
-    }
 }
